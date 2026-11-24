@@ -910,7 +910,7 @@ async function showDest(){
   $("destRow").hidden=!CAN_FOLDER;if(!CAN_FOLDER)return;
   if(!DIR)DIR=await idbGet("dir");
   $("destName").textContent=DIR?DIR.name:"Desktop (first time)";
-  $("destHelp").innerHTML=DIR?"Saved in <b>SOMO_PDF_Reports</b> – old sheets are replaced":"A window opens on the Desktop – just press <b>Select Folder</b>. Don't make a new folder.";
+  $("destHelp").innerHTML=DIR?"Saved in <b>SOMO_PDF_Reports</b> – old sheets are replaced":"First time only: on the Desktop make a new folder named <b>SOMO_PDF_Reports</b>, open it, then press <b>Select Folder</b>.";
 }
 async function pickDir(){DIR=await window.showDirectoryPicker({id:"somo-pdf",mode:"readwrite",startIn:"desktop"});await idbSet("dir",DIR);$("destName").textContent=DIR.name;return DIR;}
 $("destChange").addEventListener("click",async()=>{try{await pickDir();}catch(e){}});
