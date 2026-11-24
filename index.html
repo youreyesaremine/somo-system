@@ -128,6 +128,13 @@ box-shadow:0 8px 22px rgba(0,0,0,.18);z-index:15;overflow:hidden}
 .tab.on{border-color:var(--ok);background:var(--okbg);color:var(--ok)}
 .pv{background:#7d8796;border-radius:10px;padding:8px;overflow:hidden}
 .pvin{transform-origin:top left}
+.pvsz{position:relative;overflow:hidden}
+.pv.zoomed{overflow:auto;cursor:grab}
+.pv.zoomed.drag{cursor:grabbing}
+.zbar{display:flex;align-items:center;justify-content:flex-end;gap:6px;margin:-2px 0 6px}
+.zbar button{height:32px;min-width:38px;border-radius:9px;border:1.5px solid var(--line);background:var(--inp);color:var(--ink);font-weight:800;font-size:16px;padding:0 10px}
+.zbar #zFit{font-size:12.5px}
+.zbar span{min-width:46px;text-align:center;font-size:12.5px;font-weight:800;color:var(--muted)}
 .btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
 .pbtn{height:48px;border:none;border-radius:12px;background:var(--navy);color:#fff;font-size:15px;font-weight:800}
 .pbtn.alt{background:var(--ok)}
@@ -225,7 +232,8 @@ footer b{color:var(--ink)}
 <section class="card" id="cP">
   <div class="ch"><div class="t"><span class="num">4</span>Preview &amp; Print</div><span class="tagr">A4</span></div>
   <div class="tabs" id="tabs"></div>
-  <div class="pv" id="pv"><div class="pvin" id="pvin"></div></div>
+  <div class="zbar"><button type="button" id="zOut" aria-label="Zoom out">−</button><button type="button" id="zFit">Fit</button><span id="zPct">100%</span><button type="button" id="zIn" aria-label="Zoom in">+</button></div>
+  <div class="pv" id="pv"><div class="pvsz" id="pvsz"><div class="pvin" id="pvin"></div></div></div>
   <div id="pwarn"></div>
   <div class="btns"><button class="pbtn" id="printBtn">Print</button><button class="pbtn alt" id="pdfBtn">Save PDF</button></div>
   <div class="fname" id="fname"></div>
@@ -240,7 +248,7 @@ footer b{color:var(--ink)}
 <div class="modal" id="saveDlg" hidden><div class="sheetbox">
   <h3>Save PDF</h3><p>Choose the sheets to save. Each sheet is saved as its own PDF file.</p>
   <div id="chks"></div>
-  <div class="dest" id="destRow" hidden><span><b id="destName">Choose a folder</b><br><small>Files are saved in <b>SOMO_PDF_Reports</b> inside this folder</small></span><button type="button" id="destChange">Change</button></div>
+  <div class="dest" id="destRow" hidden><span><b id="destName">Desktop</b><br><small id="destHelp">Saved in <b>SOMO_PDF_Reports</b> – old sheets are replaced</small></span><button type="button" id="destChange">Change</button></div>
   <div class="mrow"><button type="button" id="dlgCancel">Cancel</button><button type="button" class="go" id="dlgOk">Save</button></div>
 </div></div>
 <div class="toast" id="toast"></div>
@@ -801,19 +809,29 @@ function buildTabs(){
   const names=printList();if(!names.includes(ST.tab))ST.tab="T";
   const box=$("tabs");box.innerHTML="";
   names.forEach(nm=>{const b=document.createElement("button");b.className="tab"+(nm===ST.tab?" on":"");b.textContent=nm;
-    b.addEventListener("click",()=>{ST.tab=nm;buzz();save();buildTabs();renderPreview();});box.appendChild(b);});
+    b.addEventListener("click",()=>{ST.tab=nm;ZOOM=1;buzz();save();buildTabs();renderPreview();});box.appendChild(b);});
 }
-let lastModel=null;
+let lastModel=null,ZOOM=1;
+function setZoom(z,cx,cy){const pv=$("pv"),old=ZOOM;ZOOM=Math.min(4,Math.max(1,Math.round(z*100)/100));if(ZOOM===old)return;
+  const r=pv.getBoundingClientRect(),px=cx==null?pv.clientWidth/2:cx-r.left,py=cy==null?pv.clientHeight/2:cy-r.top;
+  const fx=(pv.scrollLeft+px)/old,fy=(pv.scrollTop+py)/old;
+  renderPreview();pv.scrollLeft=fx*ZOOM-px;pv.scrollTop=fy*ZOOM-py;}
 function renderPreview(){
   const M=lastModel||model();const name=printList().includes(ST.tab)?ST.tab:"T";
   const {page,g}=name==="Label"?labelPage():buildPage(name,M);
-  const pv=$("pv"),pin=$("pvin");pin.innerHTML="";page.style.boxShadow="0 2px 10px rgba(0,0,0,.35)";pin.appendChild(page);
+  const pv=$("pv"),pin=$("pvin"),sz=$("pvsz");pin.innerHTML="";page.style.boxShadow="0 2px 10px rgba(0,0,0,.35)";pin.appendChild(page);
   const wide=window.matchMedia("(min-width:1000px)").matches;
-  let s=(pv.clientWidth-16)/g.pw;
-  if(wide)s=Math.min(s,(Math.max(360,window.innerHeight-250)-16)/g.ph);   /* whole A4 page visible next to the form */
+  const keepX=pv.scrollLeft,keepY=pv.scrollTop;
+  let fit=(pv.clientWidth-16)/g.pw;
+  if(wide)fit=Math.min(fit,(Math.max(360,window.innerHeight-290)-16)/g.ph);   /* whole A4 page visible next to the form */
+  const s=fit*ZOOM;
   pin.style.transform=`scale(${s})`;pin.style.width=g.pw+"px";
-  pin.style.marginLeft=Math.max(0,(pv.clientWidth-16-g.pw*s)/2)+"px";
-  pv.style.height=(g.ph*s+16)+"px";
+  sz.style.width=(g.pw*s)+"px";sz.style.height=(g.ph*s)+"px";
+  sz.style.marginLeft=Math.max(0,(pv.clientWidth-16-g.pw*s)/2)+"px";
+  pv.style.height=(g.ph*fit+16)+"px";
+  pv.classList.toggle("zoomed",ZOOM>1);
+  if(ZOOM>1){pv.scrollLeft=keepX;pv.scrollTop=keepY;}
+  $("zPct").textContent=Math.round(ZOOM*100)+"%";
   const L=printList();$("printBtn").textContent=`Print ${name}`+(L.length>1?`  (${L.indexOf(name)+1}/${L.length})`:"");
   $("fname").innerHTML="PDF files: "+sheetNames().map(n=>esc(sheetFile(n,n==="T"?M.T:M[n]))+".pdf").concat("Label.pdf").join(" · ");
   const w=[];
@@ -891,21 +909,28 @@ let DIR=null;
 async function showDest(){
   $("destRow").hidden=!CAN_FOLDER;if(!CAN_FOLDER)return;
   if(!DIR)DIR=await idbGet("dir");
-  $("destName").textContent=DIR?DIR.name:"Choose a folder (e.g. Desktop)";
+  $("destName").textContent=DIR?DIR.name:"Desktop (first time)";
+  $("destHelp").innerHTML=DIR?"Saved in <b>SOMO_PDF_Reports</b> – old sheets are replaced":"A window opens on the Desktop – just press <b>Select Folder</b>. Don't make a new folder.";
 }
 async function pickDir(){DIR=await window.showDirectoryPicker({id:"somo-pdf",mode:"readwrite",startIn:"desktop"});await idbSet("dir",DIR);$("destName").textContent=DIR.name;return DIR;}
 $("destChange").addEventListener("click",async()=>{try{await pickDir();}catch(e){}});
 async function folderReady(){           /* must run straight after the tap (browser needs the user gesture) */
   if(!DIR)DIR=await idbGet("dir");
   if(DIR){const o={mode:"readwrite"};
-    if(await DIR.queryPermission(o)==="granted")return DIR;
-    if(await DIR.requestPermission(o)==="granted")return DIR;}
+    try{
+      let ok=await DIR.queryPermission(o)==="granted"||await DIR.requestPermission(o)==="granted";
+      if(ok){await DIR.getDirectoryHandle(FOLDER,{create:true});return DIR;}   /* folder still there? */
+    }catch(e){}
+    DIR=null;await idbSet("dir",null);toast("The saved folder was moved or deleted – choose a folder again",3500);}
   return await pickDir();
 }
 async function writeFolder(dir,files){
-  const sub=await dir.getDirectoryHandle(FOLDER,{create:true});
+  /* like the Excel macro: the old SOMO_PDF_Reports folder is removed and made again, so only the new sheets are inside */
+  let sub;
+  if(dir.name===FOLDER){sub=dir;for await(const [n,h] of sub.entries()){if(h.kind==="file"&&/\.pdf$/i.test(n))await sub.removeEntry(n);}}
+  else{try{await dir.removeEntry(FOLDER,{recursive:true});}catch(e){}sub=await dir.getDirectoryHandle(FOLDER,{create:true});}
   for(const f of files){const fh=await sub.getFileHandle(f.file,{create:true});const w=await fh.createWritable();await w.write(f.blob);await w.close();}
-  return dir.name+"\\"+FOLDER;
+  return dir.name===FOLDER?dir.name:dir.name+"\\"+FOLDER;
 }
 async function downloadAll(files,btn){
   for(let i=0;i<files.length;i++){if(btn)btn.textContent=`Saving ${i+1}/${files.length}`;
@@ -932,7 +957,10 @@ async function savePDFs(names){
     for(let i=0;i<names.length;i++){btn.textContent=`Preparing ${i+1}/${names.length}`;
       if(names[i]==="__label")files.push({file:"Label.pdf",blob:new Blob([b64bytes(LABEL_PDF)],{type:"application/pdf"})});
       else files.push(await makePDF(names[i],M));}
-    if(dir){const where=await writeFolder(dir,files);toast(`${files.length} PDF file${files.length>1?"s":""} saved in ${where}`,3200);}
+    if(dir){let where=null;
+      try{where=await writeFolder(dir,files);}catch(e){DIR=null;await idbSet("dir",null);}
+      if(where)toast(`${files.length} PDF file${files.length>1?"s":""} saved in ${where}`,3200);
+      else{await downloadAll(files,btn);toast("Folder not found – files saved to Downloads. Choose a new folder next time.",4000);}}
     else if(IS_IOS&&navigator.canShare&&navigator.canShare({files:[new File([files[0].blob],files[0].file,{type:"application/pdf"})]})){btn.textContent=old;await shareSheet(files);}
     else{await downloadAll(files,btn);toast(`${files.length} PDF file${files.length>1?"s":""} saved to Downloads`,2600);}
   }catch(e){toast("PDF error: "+(e&&e.message||e),4000);}
@@ -1041,6 +1069,15 @@ function init(){applyTheme();if(!bound){bound=true;bindS();}
   $("bill1").value=ST.bills[0]||"";$("dest1").value=ST.dests[0]||"";$("ship1").value=ST.ships[0]||"";$("vessel").value=ST.vessel||"";$("sdate").value=ST.sdate||"";
   ["parcels","product","jetty","insp","agent"].forEach(selField);
   buildExtras();buildEvents();buildDelays();buildTabs();refresh();renderPreview();}
+$("zIn").addEventListener("click",()=>setZoom(ZOOM+0.5));
+$("zOut").addEventListener("click",()=>setZoom(ZOOM-0.5));
+$("zFit").addEventListener("click",()=>{ZOOM=1;renderPreview();});
+$("pv").addEventListener("wheel",e=>{if(!e.ctrlKey)return;e.preventDefault();setZoom(ZOOM*(e.deltaY<0?1.2:1/1.2),e.clientX,e.clientY);},{passive:false});
+$("pv").addEventListener("dblclick",e=>{setZoom(ZOOM>1?1:2.5,e.clientX,e.clientY);});
+(()=>{const pv=$("pv");let d=null;   /* drag to move around when zoomed (mouse) */
+  pv.addEventListener("pointerdown",e=>{if(ZOOM<=1||e.pointerType!=="mouse")return;d={x:e.clientX,y:e.clientY,l:pv.scrollLeft,t:pv.scrollTop};pv.classList.add("drag");});
+  window.addEventListener("pointermove",e=>{if(!d)return;pv.scrollLeft=d.l-(e.clientX-d.x);pv.scrollTop=d.t-(e.clientY-d.y);});
+  window.addEventListener("pointerup",()=>{d=null;pv.classList.remove("drag");});})();
 $("addDelay").addEventListener("click",()=>{const b=$("addDelay");
   if(!b.classList.contains("arm")){b.classList.add("arm");b.textContent="Tap again to add a delay";buzz();clearTimeout(b._t);
     b._t=setTimeout(()=>{b.classList.remove("arm");b.textContent="Add Delay";},2500);return;}
