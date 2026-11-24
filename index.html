@@ -130,6 +130,16 @@ box-shadow:0 8px 22px rgba(0,0,0,.18);z-index:15;overflow:hidden}
 .pbtn.alt{background:var(--ok)}
 [data-theme=dark] .pbtn{color:#0f1620}
 .pbtn:disabled{opacity:.55}
+.sst{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;margin-bottom:8px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--auto);flex:0 0 auto}
+.dot.ok{background:var(--ok)}.dot.wait{background:var(--gold)}.dot.err{background:var(--err)}
+.code{font-family:"Roboto Mono",Consolas,monospace;font-size:17px;font-weight:800;letter-spacing:1.5px;text-align:center;background:var(--inp);border:1.5px dashed var(--navy);border-radius:10px;padding:10px 6px;margin:6px 0 8px;word-break:break-all}
+.sbtns{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.sbtns button{height:40px;border-radius:10px;border:1.5px solid var(--line);background:var(--inp);color:var(--ink);font-weight:800;font-size:13px}
+.sbtns button.pri{background:var(--navy);border-color:var(--navy);color:#fff}
+[data-theme=dark] .sbtns button.pri{color:#0f1620}
+.sbtns button.dng{color:var(--err);border-color:var(--err)}
+.snote{font-size:11.5px;color:var(--muted);margin:8px 2px 0;line-height:1.5}
 .fname{font-size:11.5px;color:var(--muted);text-align:center;margin-top:7px;line-height:1.6}
 .warn{background:var(--errbg);color:var(--err);border-radius:9px;padding:7px 9px;font-size:12.5px;font-weight:700;margin-top:8px}
 #reset{width:100%;height:46px;border-radius:12px;border:1.5px solid var(--err);background:transparent;color:var(--err);font-size:15px;font-weight:800;margin:6px 0 2px}
@@ -191,6 +201,10 @@ footer b{color:var(--ink)}
 </section>
 
 </div><div class="side">
+<section class="card" id="cSync">
+  <div class="ch"><div class="t"><span class="num">5</span>Cloud Sync</div><span class="tagr" id="syncTag">OFF</span></div>
+  <div id="syncBody"></div>
+</section>
 <section class="card" id="cP">
   <div class="ch"><div class="t"><span class="num">4</span>Preview &amp; Print</div><span class="tagr">A4</span></div>
   <div class="tabs" id="tabs"></div>
@@ -317,7 +331,12 @@ function load(){
       n.events.forEach(ev=>{const r=13+ev.base;ev.d=(o.ed&&o.ed[r])||"";ev.t=(o.et&&o.et[r])||"";ev.rm=(o.er&&o.er[r])||"";});
       (o.delays||[]).forEach((d,i)=>{if(n.delays[i])n.delays[i].r=d.r||"";});ST=n;}}catch(e){}
 }
-function save(){try{localStorage.setItem(KEY,JSON.stringify(ST));}catch(e){}}
+let lastSnap=null;
+function syncPart(st){const o=Object.assign({},st);delete o.theme;delete o.tab;delete o._mt;delete o._rmOpen;return JSON.stringify(o);}
+function save(){
+  try{const snap=syncPart(ST);
+    if(lastSnap!==null&&snap!==lastSnap){ST._mt=Date.now();SYNC.schedule();}
+    lastSnap=snap;localStorage.setItem(KEY,JSON.stringify(ST));}catch(e){}}
 function nParcels(){const n=parseInt(normDigits(ST.parcels),10);return isNaN(n)||n<1?0:Math.min(n,20);}
 let HIST={vessel:[],dest:[]};
 function loadHist(){try{const h=JSON.parse(localStorage.getItem(HKEY)||"null");if(h)HIST=Object.assign({vessel:[],dest:[]},h);}catch(e){}}
@@ -845,6 +864,86 @@ async function savePDFs(names){
   btn.disabled=false;btn.textContent=old;
 }
 
+/* ===== Cloud Sync (Cloudflare Pages Function + KV). Data is encrypted on the device with the sync code. ===== */
+const SKEY="somo_sync_v1";
+const SYNC=(()=>{
+  const web=/^https?:$/.test(location.protocol)&&!!(window.crypto&&crypto.subtle);
+  let cfg={code:"",last:0};try{cfg=Object.assign(cfg,JSON.parse(localStorage.getItem(SKEY)||"{}"));}catch(e){}
+  let keys=null,timer=0,busy=false,again=false,state="off",msg="";
+  const saveCfg=()=>{try{localStorage.setItem(SKEY,JSON.stringify(cfg));}catch(e){}};
+  const norm=c=>String(c||"").toUpperCase().replace(/[^A-Z2-7]/g,"");
+  const fmt=c=>norm(c).replace(/(.{4})(?=.)/g,"$1-");
+  const hex=b=>[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
+  async function derive(){if(keys&&keys.code===cfg.code)return keys;const e=new TextEncoder();
+    const id=hex(await crypto.subtle.digest("SHA-256",e.encode("somo-id:"+cfg.code)));
+    const raw=await crypto.subtle.digest("SHA-256",e.encode("somo-key:"+cfg.code));
+    const k=await crypto.subtle.importKey("raw",raw,"AES-GCM",false,["encrypt","decrypt"]);
+    return keys={code:cfg.code,id,k};}
+  async function seal(obj){const K=await derive(),iv=crypto.getRandomValues(new Uint8Array(12));
+    const ct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv},K.k,new TextEncoder().encode(JSON.stringify(obj))));
+    const all=new Uint8Array(12+ct.length);all.set(iv);all.set(ct,12);let s="";all.forEach(b=>s+=String.fromCharCode(b));return btoa(s);}
+  async function open(c){const K=await derive(),a=b64bytes(c);
+    const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:a.slice(0,12)},K.k,a.slice(12));return JSON.parse(new TextDecoder().decode(pt));}
+  function payload(){const st=JSON.parse(JSON.stringify(ST));delete st.theme;delete st.tab;return {st,hist:HIST};}
+  function apply(remote,t){
+    const keep={theme:ST.theme,tab:ST.tab};
+    ST=Object.assign(blankState(),remote.st||{},keep);ST.man=Object.assign(blankState().man,(remote.st||{}).man||{});ST._mt=t;
+    if(remote.hist){["vessel","dest"].forEach(k=>{const m=(remote.hist[k]||[]).concat(HIST[k]||[]);HIST[k]=m.filter((v,i)=>m.findIndex(x=>x.toUpperCase()===v.toUpperCase())===i).slice(0,40);});saveHist();}
+    lastSnap=syncPart(ST);try{localStorage.setItem(KEY,JSON.stringify(ST));}catch(e){}
+    openMenu=null;renaming=null;init();
+  }
+  async function run(){
+    if(!web||!cfg.code)return;if(busy){again=true;return;}busy=true;
+    if(!navigator.onLine){set("wait","Offline – will sync when online");busy=false;return;}
+    set("wait","Syncing…");
+    try{const K=await derive();
+      const r=await fetch("api/sync?id="+K.id,{cache:"no-store"});
+      if(!r.ok)throw new Error(r.status===500?"Cloud storage is not set up yet":"Server error "+r.status);
+      const rem=await r.json(),lt=ST._mt||0;
+      if(rem&&rem.t>lt){apply(await open(rem.c),rem.t);toast("Updated from the cloud ☁️");}
+      else if(!rem||rem.t<lt){
+        const body=JSON.stringify({t:lt||Date.now(),c:await seal(payload())});
+        const w=await fetch("api/sync?id="+K.id,{method:"PUT",headers:{"content-type":"application/json"},body});
+        if(w.status===409){busy=false;return run();}
+        if(!w.ok)throw new Error("Upload failed ("+w.status+")");}
+      cfg.last=Date.now();saveCfg();set("ok","Synced "+new Date(cfg.last).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",hour12:false}));
+    }catch(e){set("err",e&&e.name==="OperationError"?"Wrong sync code for this data":(e.message||"Sync error"));}
+    busy=false;if(again){again=false;run();}
+  }
+  function set(s,m){state=s;msg=m;render();}
+  function render(){
+    const tag=$("syncTag"),b=$("syncBody");if(!b)return;
+    if(!web){tag.textContent="WEB APP";b.innerHTML=`<div class="snote">Cloud Sync works in the installed web app (the online link). This offline file keeps your data on this device only.</div>`;return;}
+    if(!cfg.code){tag.textContent="OFF";
+      b.innerHTML=`<div class="snote" style="margin:0 2px 8px">Continue the same shipment on your phone, iPhone and PC. Create a code on the first device, then enter the same code on the others.</div>
+        <div class="sbtns"><button class="pri" id="sNew">➕ Create sync code</button><button id="sJoin">🔑 I have a code</button></div>`;
+      $("sNew").onclick=()=>{const a=crypto.getRandomValues(new Uint8Array(15)),A="ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";let c="",bits=0,val=0;
+        a.forEach(x=>{val=(val<<8)|x;bits+=8;while(bits>=5){c+=A[(val>>(bits-5))&31];bits-=5;}});
+        cfg.code=c.slice(0,24);keys=null;saveCfg();ST._mt=ST._mt||Date.now();buzz();run();showCode=true;render();};
+      $("sJoin").onclick=()=>{const v=prompt("Enter the sync code from your other device:");const c=norm(v);
+        if(!c)return;if(c.length!==24){toast("The code must have 24 letters/digits",3000);return;}
+        cfg.code=c;keys=null;saveCfg();ST._mt=0;buzz();run();render();};
+      return;}
+    tag.textContent="ON";
+    b.innerHTML=`<div class="sst"><span class="dot ${state==="ok"?"ok":state==="err"?"err":"wait"}"></span><span>${esc(msg||"Ready")}</span></div>
+      ${showCode?`<div class="code">${fmt(cfg.code)}</div>`:""}
+      <div class="sbtns"><button class="pri" id="sNow">🔄 Sync now</button><button id="sShow">${showCode?"🙈 Hide code":"👁 Show code"}</button>
+      ${showCode?`<button id="sCopy">📋 Copy code</button>`:""}<button class="dng" id="sOff">⏏ Disconnect</button></div>
+      <div class="snote">Saves automatically a few seconds after each change. Keep the code private – anyone with it can open this shipment.</div>`;
+    $("sNow").onclick=()=>{buzz();run();};
+    $("sShow").onclick=()=>{showCode=!showCode;render();};
+    if($("sCopy"))$("sCopy").onclick=()=>{const t=fmt(cfg.code);
+      (window.isSecureContext&&navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).catch(()=>{const ta=document.createElement("textarea");ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand("copy");ta.remove();}).finally(()=>toast("Code copied"));};
+    $("sOff").onclick=e=>{const x=e.currentTarget;if(!x.classList.contains("arm")){x.classList.add("arm");x.textContent="Tap again";setTimeout(()=>{x.classList.remove("arm");x.textContent="⏏ Disconnect";},2500);return;}
+      cfg={code:"",last:0};keys=null;saveCfg();state="off";render();toast("This device is disconnected (data kept)");};
+  }
+  let showCode=false;
+  return {schedule(){if(!web||!cfg.code)return;clearTimeout(timer);set("wait","Saving…");timer=setTimeout(run,3000);},
+          run,render,web};
+})();
+window.addEventListener("online",()=>SYNC.run());
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")SYNC.run();});
+
 /* theme */
 function applyTheme(){const t=ST.theme||(window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
   document.documentElement.dataset.theme=t;$("theme").textContent=t==="dark"?"☀️":"🌙";}
@@ -870,7 +969,7 @@ if(/^https?:$/.test(location.protocol)){
   const l=document.createElement("link");l.rel="manifest";l.href="manifest.webmanifest";document.head.appendChild(l);
   if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
 }
-load();loadHist();init();
+load();loadHist();lastSnap=syncPart(ST);init();SYNC.render();SYNC.run();
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(()=>renderPreview());
 </script>
 </body>
