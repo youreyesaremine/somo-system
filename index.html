@@ -24,9 +24,10 @@ body{background:var(--bg);color:var(--ink);font-family:Roboto,"Segoe UI",Arial,s
 .grid{display:block}
 @media (min-width:1000px){
   .wrap{max-width:1280px;padding:0 18px}
-  .grid{display:grid;grid-template-columns:minmax(420px,560px) 1fr;gap:18px;align-items:start}
+  .grid{display:grid;grid-template-columns:minmax(420px,560px) minmax(0,1fr);gap:18px;align-items:start}
   .side{position:sticky;top:58px}
-  .pv{max-height:calc(100vh - 230px);overflow:auto}
+  .pv{overflow:hidden}
+  .side,.mainc{min-width:0}
   body{font-size:14.5px}
 }
 header{position:sticky;top:0;z-index:20;background:var(--navy);color:#fff;border-bottom:2px solid var(--gold)}
@@ -139,6 +140,18 @@ box-shadow:0 8px 22px rgba(0,0,0,.18);z-index:15;overflow:hidden}
 .sbtns button.pri{background:var(--navy);border-color:var(--navy);color:#fff}
 [data-theme=dark] .sbtns button.pri{color:#0f1620}
 .sbtns button.dng{color:var(--err);border-color:var(--err)}
+.sbtns select{height:40px;font-size:13px;font-weight:700;border-radius:10px}
+#lockScr{position:fixed;inset:0;z-index:200;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:20px}
+body.locked>*:not(#lockScr):not(.toast){display:none!important}
+.lbox{width:100%;max-width:340px;text-align:center}
+.lbox img{width:84px;height:84px}
+.lbox h2{margin:8px 0 2px;font-size:20px}
+.lbox p{margin:0 0 14px;color:var(--muted)}
+.lbox input,.pin{text-align:center;font-size:24px;letter-spacing:8px;height:54px;margin-bottom:8px}
+.lbox .pbtn{width:100%}
+.lerr{color:var(--err);font-size:13px;font-weight:700;min-height:18px;margin:2px 0 8px}
+.lnk2{background:none;border:none;color:var(--muted);font-size:13px;margin-top:14px;text-decoration:underline}
+.lnk2.arm{color:var(--err);font-weight:800}
 .snote{font-size:11.5px;color:var(--muted);margin:8px 2px 0;line-height:1.5}
 .fname{font-size:11.5px;color:var(--muted);text-align:center;margin-top:7px;line-height:1.6}
 .warn{background:var(--errbg);color:var(--err);border-radius:9px;padding:7px 9px;font-size:12.5px;font-weight:700;margin-top:8px}
@@ -324,8 +337,26 @@ function blankState(){return {parcels:"",bills:[""],vessel:"",product:"",dests:[
   man:{parcels:false,product:false,jetty:false,insp:false,agent:false},
   events:defaultEvents(),delays:[{fd:"",ft:"",td:"",tt:"",r:""},{fd:"",ft:"",td:"",tt:"",r:""}],theme:null,tab:"T"};}
 let ST=blankState();
+/* ===== storage: plain, or encrypted with the App Lock PIN ===== */
+const LKEY="somo_locked_v1",FKEY="somo_lock_fail";
+const PLAIN={st:KEY,hist:HKEY,sync:"somo_sync_v1"};
+let MEM=null,LOCK=null,persistSeq=0,persistP=Promise.resolve();   /* LOCK={key,salt,iter,min} while unlocked */
+const Store={
+  get(n){if(LOCK)return MEM[n]==null?null:JSON.parse(JSON.stringify(MEM[n]));try{return JSON.parse(localStorage.getItem(PLAIN[n])||"null");}catch(e){return null;}},
+  set(n,v){if(LOCK){MEM[n]=JSON.parse(JSON.stringify(v));persistLocked();return;}try{localStorage.setItem(PLAIN[n],JSON.stringify(v));}catch(e){}}
+};
+function u8b64(u){let s="";u.forEach(b=>s+=String.fromCharCode(b));return btoa(s);}
+async function pinKey(pin,salt,iter){const base=await crypto.subtle.importKey("raw",new TextEncoder().encode("somo-lock:"+pin),"PBKDF2",false,["deriveKey"]);
+  return crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:iter,hash:"SHA-256"},base,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);}
+function persistLocked(){const my=++persistSeq,L=LOCK,data=JSON.stringify(MEM);
+  persistP=persistP.then(async()=>{const iv=crypto.getRandomValues(new Uint8Array(12));
+    const ct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv},L.key,new TextEncoder().encode(data)));
+    if(my!==persistSeq||LOCK!==L)return;
+    try{localStorage.setItem(LKEY,JSON.stringify({v:1,salt:u8b64(L.salt),iter:L.iter,min:L.min,iv:u8b64(iv),ct:u8b64(ct)}));}catch(e){}}).catch(()=>{});
+  return persistP;}
 function load(){
-  try{const s=JSON.parse(localStorage.getItem(KEY)||"null");if(s&&typeof s==="object"){ST=Object.assign(blankState(),s);ST.man=Object.assign(blankState().man,s.man||{});return;}}catch(e){}
+  try{const s=Store.get("st");if(s&&typeof s==="object"){ST=Object.assign(blankState(),s);ST.man=Object.assign(blankState().man,s.man||{});return;}}catch(e){}
+  if(LOCK)return;
   try{const o=JSON.parse(localStorage.getItem(OLDKEY)||"null"); /* migrate first version */
     if(o&&typeof o==="object"){const n=blankState();["parcels","bills","vessel","product","dests","ships","sdate","jetty","insp","agent","theme"].forEach(k=>{if(o[k]!==undefined)n[k]=o[k];});
       n.events.forEach(ev=>{const r=13+ev.base;ev.d=(o.ed&&o.ed[r])||"";ev.t=(o.et&&o.et[r])||"";ev.rm=(o.er&&o.er[r])||"";});
@@ -336,11 +367,11 @@ function syncPart(st){const o=Object.assign({},st);delete o.theme;delete o.tab;d
 function save(){
   try{const snap=syncPart(ST);
     if(lastSnap!==null&&snap!==lastSnap){ST._mt=Date.now();SYNC.schedule();}
-    lastSnap=snap;localStorage.setItem(KEY,JSON.stringify(ST));}catch(e){}}
+    lastSnap=snap;Store.set("st",ST);}catch(e){}}
 function nParcels(){const n=parseInt(normDigits(ST.parcels),10);return isNaN(n)||n<1?0:Math.min(n,20);}
 let HIST={vessel:[],dest:[]};
-function loadHist(){try{const h=JSON.parse(localStorage.getItem(HKEY)||"null");if(h)HIST=Object.assign({vessel:[],dest:[]},h);}catch(e){}}
-function saveHist(){try{localStorage.setItem(HKEY,JSON.stringify(HIST));}catch(e){}}
+function loadHist(){const h=Store.get("hist");if(h)HIST=Object.assign({vessel:[],dest:[]},h);}
+function saveHist(){Store.set("hist",HIST);}
 function remember(){
   const add=(k,v)=>{v=String(v||"").trim();if(!v)return;HIST[k]=[v].concat(HIST[k].filter(x=>x.toUpperCase()!==v.toUpperCase())).slice(0,40);};
   add("vessel",ST.vessel);for(let i=0;i<Math.max(1,nParcels());i++)add("dest",ST.dests[i]);saveHist();
@@ -762,7 +793,12 @@ function renderPreview(){
   const M=lastModel||model();const name=sheetNames().includes(ST.tab)?ST.tab:"T";
   const {page,g}=buildPage(name,M);
   const pv=$("pv"),pin=$("pvin");pin.innerHTML="";page.style.boxShadow="0 2px 10px rgba(0,0,0,.35)";pin.appendChild(page);
-  const s=(pv.clientWidth-16)/g.pw;pin.style.transform=`scale(${s})`;pin.style.width=g.pw+"px";pv.style.height=(g.ph*s+16)+"px";
+  const wide=window.matchMedia("(min-width:1000px)").matches;
+  let s=(pv.clientWidth-16)/g.pw;
+  if(wide)s=Math.min(s,(Math.max(360,window.innerHeight-250)-16)/g.ph);   /* whole A4 page visible next to the form */
+  pin.style.transform=`scale(${s})`;pin.style.width=g.pw+"px";
+  pin.style.marginLeft=Math.max(0,(pv.clientWidth-16-g.pw*s)/2)+"px";
+  pv.style.height=(g.ph*s+16)+"px";
   $("fname").innerHTML="PDF files: "+sheetNames().map(n=>esc(sheetFile(n,n==="T"?M.T:M[n]))+".pdf").join(" · ");
   const w=[];
   if(!ST.product)w.push("Select the PRODUCT so the event names appear on sheet T.");
@@ -866,11 +902,12 @@ async function savePDFs(names){
 
 /* ===== Cloud Sync (Cloudflare Pages Function + KV). Data is encrypted on the device with the sync code. ===== */
 const SKEY="somo_sync_v1";
+const LOGIN_MSG="Sign-in expired – close and reopen the app while online";
 const SYNC=(()=>{
   const web=/^https?:$/.test(location.protocol)&&!!(window.crypto&&crypto.subtle);
-  let cfg={code:"",last:0};try{cfg=Object.assign(cfg,JSON.parse(localStorage.getItem(SKEY)||"{}"));}catch(e){}
+  let cfg={code:"",last:0};
   let keys=null,timer=0,busy=false,again=false,state="off",msg="";
-  const saveCfg=()=>{try{localStorage.setItem(SKEY,JSON.stringify(cfg));}catch(e){}};
+  const saveCfg=()=>Store.set("sync",cfg);
   const norm=c=>String(c||"").toUpperCase().replace(/[^A-Z2-7]/g,"");
   const fmt=c=>norm(c).replace(/(.{4})(?=.)/g,"$1-");
   const hex=b=>[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
@@ -889,7 +926,7 @@ const SYNC=(()=>{
     const keep={theme:ST.theme,tab:ST.tab};
     ST=Object.assign(blankState(),remote.st||{},keep);ST.man=Object.assign(blankState().man,(remote.st||{}).man||{});ST._mt=t;
     if(remote.hist){["vessel","dest"].forEach(k=>{const m=(remote.hist[k]||[]).concat(HIST[k]||[]);HIST[k]=m.filter((v,i)=>m.findIndex(x=>x.toUpperCase()===v.toUpperCase())===i).slice(0,40);});saveHist();}
-    lastSnap=syncPart(ST);try{localStorage.setItem(KEY,JSON.stringify(ST));}catch(e){}
+    lastSnap=syncPart(ST);Store.set("st",ST);
     openMenu=null;renaming=null;init();
   }
   async function run(){
@@ -897,13 +934,15 @@ const SYNC=(()=>{
     if(!navigator.onLine){set("wait","Offline – will sync when online");busy=false;return;}
     set("wait","Syncing…");
     try{const K=await derive();
-      const r=await fetch("api/sync?id="+K.id,{cache:"no-store"});
+      const r=await fetch("api/sync?id="+K.id,{cache:"no-store",redirect:"manual",credentials:"same-origin"});
+      if(r.type==="opaqueredirect"||r.status===0)throw new Error(LOGIN_MSG);
       if(!r.ok)throw new Error(r.status===500?"Cloud storage is not set up yet":"Server error "+r.status);
       const rem=await r.json(),lt=ST._mt||0;
       if(rem&&rem.t>lt){apply(await open(rem.c),rem.t);toast("Updated from the cloud ☁️");}
       else if(!rem||rem.t<lt){
         const body=JSON.stringify({t:lt||Date.now(),c:await seal(payload())});
-        const w=await fetch("api/sync?id="+K.id,{method:"PUT",headers:{"content-type":"application/json"},body});
+        const w=await fetch("api/sync?id="+K.id,{method:"PUT",headers:{"content-type":"application/json"},body,redirect:"manual",credentials:"same-origin"});
+        if(w.type==="opaqueredirect"||w.status===0)throw new Error(LOGIN_MSG);
         if(w.status===409){busy=false;return run();}
         if(!w.ok)throw new Error("Upload failed ("+w.status+")");}
       cfg.last=Date.now();saveCfg();set("ok","Synced "+new Date(cfg.last).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",hour12:false}));
@@ -938,7 +977,7 @@ const SYNC=(()=>{
       cfg={code:"",last:0};keys=null;saveCfg();state="off";render();toast("This device is disconnected (data kept)");};
   }
   let showCode=false;
-  return {schedule(){if(!web||!cfg.code)return;clearTimeout(timer);set("wait","Saving…");timer=setTimeout(run,3000);},
+  return {load(){cfg=Object.assign({code:"",last:0},Store.get("sync")||{});keys=null;state="off";msg="";},schedule(){if(!web||!cfg.code)return;clearTimeout(timer);set("wait","Saving…");timer=setTimeout(run,3000);},
           run,render,web};
 })();
 window.addEventListener("online",()=>SYNC.run());
@@ -969,7 +1008,9 @@ if(/^https?:$/.test(location.protocol)){
   const l=document.createElement("link");l.rel="manifest";l.href="manifest.webmanifest";document.head.appendChild(l);
   if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
 }
-load();loadHist();lastSnap=syncPart(ST);init();SYNC.render();SYNC.run();
+function boot(){load();loadHist();SYNC.load();lastSnap=syncPart(ST);init();SYNC.render();SYNC.run();}
+
+boot();
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(()=>renderPreview());
 </script>
 </body>
