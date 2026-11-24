@@ -494,6 +494,7 @@ function layoutSheet(name,M){
     const text=fmtNum(val,st.nf);if(text==="")continue;
     const isNum=typeof val==="number";
     let h=st.h||(isNum?"right":"left");if(h==="centerContinuous")h="center";if(h==="general")h=isNum?"right":"left";
+    if(/^DL\d+[CD]$/.test(ref))h="center";   /* delay From / To: centred in the cell */
     const va=st.v||"bottom";
     let bx1=x1,bx2=x2;
     if(!st.wrap&&!st.rot&&er===r&&ec===cc&&!isNum){
