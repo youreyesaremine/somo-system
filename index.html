@@ -92,6 +92,10 @@ box-shadow:0 8px 22px rgba(0,0,0,.18);z-index:15;overflow:hidden}
 [data-theme=dark] .rn button{color:#0f1620}
 .rmk{margin-top:6px}
 .rmk input{height:36px;font-size:14px;font-weight:500}
+.subh{font-weight:800;font-size:15px;margin:14px 2px 8px;padding-top:12px;border-top:1px solid var(--line)}
+.rbr{display:grid;grid-template-columns:52px 1fr;gap:8px;align-items:center;margin-bottom:6px}
+.rbr span{font-weight:800;font-size:13.5px}
+.rbr input{height:40px}
 .legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin:-2px 0 8px}
 .legend span{display:inline-flex;align-items:center;gap:4px}
 .legend i{width:10px;height:10px;border-radius:2px;display:inline-block}
@@ -212,23 +216,21 @@ footer b{color:var(--ink)}
   <div class="f" data-sel="agent" style="margin-bottom:0"><label>Agent Company</label></div>
 </section>
 
-<section class="card" id="cT">
-  <div class="ch"><div class="t"><span class="num">2</span>Loading Time Sheet</div><span class="tagr">SHEET T</span></div>
-  <div class="legend"><span><i style="background:var(--ga)"></i>Date from 1st Line</span><span><i style="background:var(--gb)"></i>Date from Completed Loading</span></div>
-  <div id="events"></div>
+<section class="card" id="cR">
+  <div class="ch"><div class="t"><span class="num">2</span>Received On Board On</div><span class="tagr">SHEET D</span></div>
+  <div id="robs"></div>
 </section>
 
-<section class="card" id="cDl">
-  <div class="ch"><div class="t"><span class="num">3</span>Delays</div><span class="tagr">SHEET T</span></div>
+<section class="card" id="cT">
+  <div class="ch"><div class="t"><span class="num">3</span>Loading Time Sheet</div><span class="tagr">SHEET T</span></div>
+  <div class="legend"><span><i style="background:var(--ga)"></i>Date from 1st Line</span><span><i style="background:var(--gb)"></i>Date from Completed Loading</span></div>
+  <div id="events"></div>
+  <div class="subh">Delays</div>
   <div id="delays"></div>
   <button class="addbtn" id="addDelay" type="button">Add Delay</button>
 </section>
 
 </div><div class="side">
-<section class="card" id="cSync">
-  <div class="ch"><div class="t"><span class="num">5</span>Cloud Sync</div><span class="tagr" id="syncTag">OFF</span></div>
-  <div id="syncBody"></div>
-</section>
 <section class="card" id="cP">
   <div class="ch"><div class="t"><span class="num">4</span>Preview &amp; Print</div><span class="tagr">A4</span></div>
   <div class="tabs" id="tabs"></div>
@@ -242,6 +244,10 @@ footer b{color:var(--ink)}
 </div></div>
 <button id="reset">Clear All Data</button>
 <button id="logout" hidden>Log out</button>
+<section class="card" id="cSync">
+  <div class="ch"><div class="t">Cloud Sync</div><span class="tagr" id="syncTag">OFF</span></div>
+  <div id="syncBody"></div>
+</section>
 <footer>Prepared and designed by<br><b>Eng. Mohammed Saeed Khaled</b></footer>
 </div>
 
@@ -356,7 +362,7 @@ function fmtNum(v,nf){
 
 /* ===== state ===== */
 function defaultEvents(){const a=[];for(let b=0;b<BASE_N;b++)a.push({id:newId(),base:b,name:null,g:GROUP_OF_BASE(b),d:"",t:"",rm:""});return a;}
-function blankState(){return {parcels:"",bills:[""],vessel:"",product:"",dests:[""],ships:[""],sdate:"",jetty:"",insp:"",agent:"",
+function blankState(){return {parcels:"",bills:[""],vessel:"",product:"",dests:[""],ships:[""],sdate:"",robs:[""],jetty:"",insp:"",agent:"",
   man:{parcels:false,product:false,jetty:false,insp:false,agent:false},
   events:defaultEvents(),delays:[{fd:"",ft:"",td:"",tt:"",r:""},{fd:"",ft:"",td:"",tt:"",r:""}],theme:null,tab:"T"};}
 let ST=blankState();
@@ -378,7 +384,8 @@ function persistLocked(){const my=++persistSeq,L=LOCK,data=JSON.stringify(MEM);
     try{localStorage.setItem(LKEY,JSON.stringify({v:1,salt:u8b64(L.salt),iter:L.iter,min:L.min,iv:u8b64(iv),ct:u8b64(ct)}));}catch(e){}}).catch(()=>{});
   return persistP;}
 function load(){
-  try{const s=Store.get("st");if(s&&typeof s==="object"){ST=Object.assign(blankState(),s);ST.man=Object.assign(blankState().man,s.man||{});return;}}catch(e){}
+  try{const s=Store.get("st");if(s&&typeof s==="object"){ST=Object.assign(blankState(),s);
+    if(!Array.isArray(ST.robs))ST.robs=[""];if(s.rob&&!ST.robs[0])ST.robs[0]=s.rob;delete ST.rob;ST.man=Object.assign(blankState().man,s.man||{});return;}}catch(e){}
   if(LOCK)return;
   try{const o=JSON.parse(localStorage.getItem(OLDKEY)||"null"); /* migrate first version */
     if(o&&typeof o==="object"){const n=blankState();["parcels","bills","vessel","product","dests","ships","sdate","jetty","insp","agent","theme"].forEach(k=>{if(o[k]!==undefined)n[k]=o[k];});
@@ -412,6 +419,7 @@ function evTime(ev){const p=parseTime(ev.t);return p.v!==undefined?p.v:"";}
 function dtText(d,t){const pd=parseDate(d),pt=parseTime(t);
   const ds=pd.v!==undefined?fmtNum(pd.v,NF_DATE):String(d||"").trim(),ts=pt.v!==undefined?fmtNum(pt.v,NF_TIME):String(t||"").trim();
   return ts&&ds?ts+" "+ds:(ts||ds);}
+function robDate(i){const p=parseDate((ST.robs||[])[i]||"");return p.v!==undefined?p.v:"";}
 function model(){
   const raw=(ST.bills[0]||"").trim(),sd=parseDate(ST.sdate),sdate=sd.v!==undefined?sd.v:"";
   const T={F4:cleanBill(raw),C6:ST.vessel,C7:ST.product==="LPG MIXTURE"?"LPG SEMI - REF":ST.product,C8:ST.jetty,C9:sdate,G6:ST.insp,G7:ST.agent,G3:""};
@@ -424,9 +432,9 @@ function model(){
   const D45=num(CPL.E)+(num(CPL.F)-Math.floor(num(CL.F)));       /* =E23+(F23-INT(F22)) */
   T.B45=B45;T.D45=D45;T.F45=D45>=B45?D45-B45:1+D45-B45;          /* =IF(D45>=B45,D45-B45,1+D45-B45) */
   const DL=ST.delays.map(d=>({C:dtText(d.fd,d.ft),D:dtText(d.td,d.tt),E:d.r||""}));
-  const D={W4:raw,C9:ST.vessel,C10:ST.product,C11:ST.dests[0]||"",C13:ST.ships[0]||"",E14:num(AF.E),I14:num(AF.F),E15:"",U6:""};   /* Received On Board On: left empty (not linked to DATE) */
+  const D={W4:raw,C9:ST.vessel,C10:ST.product,C11:ST.dests[0]||"",C13:ST.ships[0]||"",E14:num(AF.E),I14:num(AF.F),E15:robDate(0),U6:""};   /* Received On Board On: own field per D sheet */
   const out={T,D,EV,DL};
-  for(let i=2;i<=nParcels();i++)out["D-"+i]=Object.assign({},D,{W4:ST.bills[i-1]||"",C11:ST.dests[i-1]||"",C13:ST.ships[i-1]||""});
+  for(let i=2;i<=nParcels();i++){const r=robDate(i-1);out["D-"+i]=Object.assign({},D,{W4:ST.bills[i-1]||"",C11:ST.dests[i-1]||"",C13:ST.ships[i-1]||"",E15:r!==""?r:D.E15});}
   return out;
 }
 function sheetFile(name,vals){let b=String((name==="T"?vals.F4:vals.W4)||"").trim();b=b?b.replace(/[\/\\]/g,"-"):"No_Bill";return (name==="T"?"Time sheet ":"Distribution ")+b;}
@@ -655,7 +663,7 @@ function selField(key){
   }
 }
 function onSChange(key){
-  if(key==="parcels"){const n=nParcels();["bills","dests","ships"].forEach(k=>{while(ST[k].length<Math.max(n,1))ST[k].push("");});buildExtras();buildTabs();}
+  if(key==="parcels"){const n=nParcels();["bills","dests","ships"].forEach(k=>{while(ST[k].length<Math.max(n,1))ST[k].push("");});buildExtras();buildRobs();buildTabs();}
   if(key==="product")buildEvents();
   refresh();
 }
@@ -792,8 +800,24 @@ function markDelays(){document.querySelectorAll("#delays .dl").forEach(el=>{let 
   el.querySelector(".hint").textContent=bad;});}
 
 /* ===== keyboard "Next" order: dates only on the two date sources, then times ===== */
+/* ===== Received On Board On: D sets the date, D-2, D-3 … follow it (Auto) unless typed ===== */
+function buildRobs(){
+  const n=Math.max(1,nParcels()),box=$("robs");box.innerHTML="";
+  while(ST.robs.length<n)ST.robs.push("");
+  for(let i=0;i<n;i++){const row=document.createElement("div");row.className="rbr";
+    row.innerHTML=`<span>${i===0?"D":"D-"+(i+1)}</span><input data-ri="${i}" inputmode="numeric" autocomplete="off" enterkeyhint="next"><div class="hint" style="grid-column:2"></div>`;
+    box.appendChild(row);const inp=row.querySelector("input");inp.value=ST.robs[i]||"";
+    inp.addEventListener("input",()=>{ST.robs[i]=inp.value;refresh();});
+    inp.addEventListener("blur",()=>{const p=parseDate(inp.value);if(p.v!==undefined){inp.value=fmtNum(p.v,NF_DATE);ST.robs[i]=inp.value;}refresh();});
+    inp.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();focusNext(inp);}});}
+  markRobs();
+}
+function markRobs(){const d0=robDate(0);
+  document.querySelectorAll("#robs input").forEach(inp=>{const i=+inp.dataset.ri,p=parseDate(inp.value);
+    inp.classList.toggle("bad",!!p.bad);inp.parentElement.querySelector(".hint").textContent=p.bad?"Invalid date":"";
+    inp.placeholder=i===0?"Optional – dd-mm-yyyy":(d0!==""?fmtNum(d0,NF_DATE):"Auto");});}
 function navList(){
-  const a=[...document.querySelectorAll("#cS input,#cS select")];
+  const a=[...document.querySelectorAll("#cS input,#cS select,#robs input")];
   ST.events.forEach(ev=>{const d=document.querySelector(`.ev[data-id="${ev.id}"]`);if(!d)return;
     if(isAnchor(ev))a.push(d.querySelector("[data-k=d]"));a.push(d.querySelector("[data-k=t]"));});
   document.querySelectorAll("#delays input").forEach(x=>a.push(x));
@@ -853,6 +877,7 @@ let rT=0;
 function refresh(){save();lastModel=model();
   ["parcels","product","jetty","insp","agent"].forEach(id=>{const el=$(id);if(el)el.classList.toggle("sel",!!el.value&&el.value!=="__m");});
   const sd=parseDate($("sdate").value);$("sdate").classList.toggle("bad",!!sd.bad);$("sdateH").textContent=sd.bad?"Invalid date":"";
+  markRobs();
   markEvents();markDelays();clearTimeout(rT);rT=setTimeout(renderPreview,120);}
 
 function labelPage(){
@@ -1031,8 +1056,7 @@ const SYNC=(()=>{
     const tag=$("syncTag"),b=$("syncBody");if(!b)return;
     if(!web){tag.textContent="WEB APP";b.innerHTML=`<div class="snote">Cloud Sync works in the installed web app (the online link). This offline file keeps your data on this device only.</div>`;return;}
     if(!cfg.code){tag.textContent="OFF";
-      b.innerHTML=`<div class="snote" style="margin:0 2px 8px">Continue the same shipment on your phone, iPhone and PC. Create a code on the first device, then enter the same code on the others.</div>
-        <div class="sbtns"><button class="pri" id="sNew">Create sync code</button><button id="sJoin">I have a code</button></div>`;
+      b.innerHTML=`        <div class="sbtns"><button class="pri" id="sNew">Create sync code</button><button id="sJoin">I have a code</button></div>`;
       $("sNew").onclick=()=>{const a=crypto.getRandomValues(new Uint8Array(15)),A="ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";let c="",bits=0,val=0;
         a.forEach(x=>{val=(val<<8)|x;bits+=8;while(bits>=5){c+=A[(val>>(bits-5))&31];bits-=5;}});
         cfg.code=c.slice(0,24);keys=null;saveCfg();ST._mt=ST._mt||Date.now();buzz();run();showCode=true;render();};
@@ -1078,7 +1102,7 @@ let bound=false;
 function init(){applyTheme();if(!bound){bound=true;bindS();}
   $("bill1").value=ST.bills[0]||"";$("dest1").value=ST.dests[0]||"";$("ship1").value=ST.ships[0]||"";$("vessel").value=ST.vessel||"";$("sdate").value=ST.sdate||"";
   ["parcels","product","jetty","insp","agent"].forEach(selField);
-  buildExtras();buildEvents();buildDelays();buildTabs();refresh();renderPreview();}
+  buildExtras();buildRobs();buildEvents();buildDelays();buildTabs();refresh();renderPreview();}
 $("zIn").addEventListener("click",()=>setZoom(ZOOM+0.5));
 $("zOut").addEventListener("click",()=>setZoom(ZOOM-0.5));
 $("zFit").addEventListener("click",()=>{ZOOM=1;renderPreview();});
